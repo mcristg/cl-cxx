@@ -388,7 +388,7 @@
       `(setf ,name-func-ptr ,func-ptr))))
 
 (defun parse-class-pointer (meta-ptr)
-  "Set pointers to c++ class constructor ans destructor"
+  "Set pointers to c++ class constructor and destructor"
   (with-foreign-slots ((name constructor destructor) meta-ptr (:struct class-info))
     (let ((d-name-pointer (read-from-string (concatenate 'string "*destruct-ptr-" name "*")))
 	  (constructor-ptr (read-from-string (concatenate 'string "*" name "-default-constructor-ptr*"))))
