@@ -228,7 +228,7 @@
     (if (cffi:null-pointer-p destructor) ;; c struct
         `(cffi:defcstruct ,(read-from-string name)
              ,@(if slot-types (parse-cstruct-slots slot-names slot-types)))
-	(let ((d-name-pointer (read-from-string (concatenate 'string "*destruct-" name "-ptr*"))))
+	(let ((d-name-pointer (read-from-string (concatenate 'string "*destruct-ptr-" name "*"))))
 	  `(progn
 	     (defclass ,(read-from-string name) ,(parse-super-classes super-classes)
 	       ((cxx-class-ptr
@@ -238,25 +238,16 @@
 	       ;; TODO: add slots
 	       ;; ,@(if slot-types (parse-class-slots slot-names slot-types)))
 	       (:documentation "Cxx class stored in lisp"))
-	     
+
+	     (export ',(read-from-string name)) ;;added due to issues with specialists	     
 	     ,(if *stream*
 		  `(defparameter ,d-name-pointer nil)
-		  `(defparameter ,d-name-pointer ,destructor))
-	     (export ',(read-from-string name)) ;;added due to issues with specialists
-	     (export ',(read-from-string (concatenate 'string "destruct-" name)))
-	     (defun ,(read-from-string (concatenate 'string "destruct-" name)) (class)
-	       "delete class"
-	       (let ((ptr (cxx-ptr class)))
-		 (if (not  (cffi:null-pointer-p ptr))
-		     (cffi:foreign-funcall-pointer ,d-name-pointer
-						   nil :pointer ptr
-						       :void)))
-             (setf (cxx-ptr class) (cffi:null-pointer)))
-           (defun ,(read-from-string
+		  `(defparameter ,d-name-pointer ,destructor))	     
+	     (defun ,(read-from-string
                     (concatenate 'string "destruct-ptr-" name)) (class-ptr)
              "delete class pointer"
              (if (not  (cffi:null-pointer-p class-ptr))
-                 (cffi:foreign-funcall-pointer ,destructor
+                 (cffi:foreign-funcall-pointer ,d-name-pointer
                                                nil :pointer class-ptr
                                                    :void)))
 
@@ -388,7 +379,7 @@
 (defun parse-class-pointer (meta-ptr)
   "Set pointers to c++ class constructor ans destructor"
   (with-foreign-slots ((name super-classes slot-names slot-types constructor destructor) meta-ptr (:struct class-info))
-    (let ((d-name-pointer (read-from-string (concatenate 'string "*destruct-" name "-ptr*")))
+    (let ((d-name-pointer (read-from-string (concatenate 'string "*destruct-ptr-" name "*")))
 	  (constructor-ptr (read-from-string (concatenate 'string "*" name "-default-constructor-ptr*"))))
       `(progn
 	 (setf ,d-name-pointer ,destructor)
