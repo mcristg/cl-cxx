@@ -6,5 +6,6 @@
    #:remove-package
    #:number-of-allocated-bytes
    #:destruct-string
-   #:init)
+   #:init
+   #:init-generate-lisp-code)
   )
