@@ -7,5 +7,6 @@
    #:number-of-allocated-bytes
    #:destruct-string
    #:init
-   #:init-generate-lisp-code)
+   #:init-generate-lisp-code
+   #:init-cxx-wrap-ptr)
   )
