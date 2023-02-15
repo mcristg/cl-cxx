@@ -372,13 +372,13 @@
 
 (defun parse-function-pointer (meta-ptr)
   "Set the pointers to c++ functions."
-  (with-foreign-slots ((name method-p class-obj thunc-ptr func-ptr arg-types return-type) meta-ptr (:struct function-info))
+  (with-foreign-slots ((name func-ptr) meta-ptr (:struct function-info))
     (let ((name-func-ptr (read-from-string (concatenate 'string "*" name "-func-ptr*"))))
       	 `(setf ,name-func-ptr ,func-ptr))))
 
 (defun parse-class-pointer (meta-ptr)
   "Set pointers to c++ class constructor ans destructor"
-  (with-foreign-slots ((name super-classes slot-names slot-types constructor destructor) meta-ptr (:struct class-info))
+  (with-foreign-slots ((name constructor destructor) meta-ptr (:struct class-info))
     (let ((d-name-pointer (read-from-string (concatenate 'string "*destruct-ptr-" name "*")))
 	  (constructor-ptr (read-from-string (concatenate 'string "*" name "-default-constructor-ptr*"))))
       `(progn
