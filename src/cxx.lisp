@@ -34,7 +34,12 @@
   (let ((m-obj (if  method-p `(obj ,(read-from-string  class-obj))))
         (lst (if arg-types (loop for i in (split-string-by arg-types #\+)
                               for j from 0
-                              collect (intern (concatenate 'string "V" (write-to-string j)))))))
+				 collect (intern (concatenate 'string "V" (write-to-string j)))))))
+    (when (and (not method-p) class-obj)
+      (setf lst (nconc lst (list (read-from-string "cl:&optional")
+				 (read-from-string "(class nil)")
+				 (read-from-string "cl:&rest")
+				 (read-from-string "rest")))))
     (if method-p
         (if lst (append (list m-obj) lst) (list m-obj))
         lst)))
@@ -179,15 +184,18 @@
 						     "destruct-ptr-"
 						     (string objT)))))
 		     `(let* ((ptr ,return-val)
-			     (obj (handler-case
-				      (make-instance ',objT
-						     :cxx-ptr ptr)
-				    (error (err)
-				      (,destruct-ptr ptr)
-				      (error err)))))
+			     (initargs (append '(:cxx-ptr) (list ptr)))
+			     (ename-class (if ,(read-from-string "class") ,(read-from-string "class") ',objT)))
+			(when rest
+			  (setf initargs (append rest initargs)))
+			(let ((obj (handler-case
+				       (apply #'make-instance ename-class (values initargs))
+				     (error (err)
+				       (,destruct-ptr ptr)
+				       (error err)))))
 			(tg:finalize obj (lambda ()
 					   (,destruct-ptr ptr)))
-			obj)))
+			obj))))
                   ;; add finalizer to string
                   ((equal parsed-type :string+ptr)
                    `(let* ((val ,return-val)
@@ -267,17 +275,20 @@
 			  `(defparameter ,construct-ptr nil)
 			  `(defparameter ,construct-ptr ,constructor))
                      (export ',m-name)
-                     (defun ,m-name ()
+                     (defun ,m-name (cl:&optional (class nil) cl:&rest rest)
                        "create class with defualt constructor"
                        (let* ((ptr (cffi:foreign-funcall-pointer
                                     ,construct-ptr nil :pointer))
-                              (obj (handler-case (make-instance ',(read-from-string name)
-                                                                :cxx-ptr ptr)
-                                     (error (err) (,destruct-ptr ptr)
-                                       (error err)))))
-                         (tg:finalize obj (lambda ()
-                                            (,destruct-ptr ptr)))
-                         obj))))))))))
+			      (initargs (append '(:cxx-ptr) (list ptr)))
+			      (ename-class (if ,(read-from-string "class") ,(read-from-string "class") ',(read-from-string name))))
+			 (when rest
+			   (setf initargs (append rest initargs)))
+			 (let ((obj (handler-case (apply #'make-instance ename-class (values initargs))
+				      (error (err) (,destruct-ptr ptr)
+					(error err)))))
+			   (tg:finalize obj (lambda ()
+					      (,destruct-ptr ptr)))
+			   obj)))))))))))
 
 
 (defun parse-constant (meta-ptr)
@@ -374,7 +385,7 @@
   "Set the pointers to c++ functions."
   (with-foreign-slots ((name func-ptr) meta-ptr (:struct function-info))
     (let ((name-func-ptr (read-from-string (concatenate 'string "*" name "-func-ptr*"))))
-      	 `(setf ,name-func-ptr ,func-ptr))))
+      `(setf ,name-func-ptr ,func-ptr))))
 
 (defun parse-class-pointer (meta-ptr)
   "Set pointers to c++ class constructor ans destructor"
