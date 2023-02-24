@@ -396,11 +396,11 @@
 
 (defun init-generate-lisp-code (file-name pack-name)
   (setf *cxx-file-name* file-name)
-  (setf *exports* nil)
+  (setf *exports* '(cxx-ptr))
   (let ((file-stream (open *cxx-file-name* :direction :output :if-exists :supersede :if-does-not-exist :create)))
     (format file-stream "(cl:when (not (cl:find-package ~@:(~S~)))~%  (cl:make-package ~@:(~S~))~%" pack-name pack-name)
-    (format file-stream "  (cl:use-package 'cl '~a))~%(cl:in-package :~a)~%~%"  pack-name pack-name)
-    (format file-stream "(import 'cxx::cxx-ptr)~%(export 'cxx-ptr)~%")
+    (format file-stream "  (cl:use-package 'cl '~a))~%~%(cl:in-package :~a)~%~%"  pack-name pack-name)
+    (format file-stream "(import 'cxx::cxx-ptr)~%")
     (close file-stream))
   (clcxx-init (callback lisp-error) (callback reg-data-stream)))
 
