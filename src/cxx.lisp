@@ -128,6 +128,8 @@
         (list type))))
 
 (defvar *stream* nil)
+(defvar *exports* nil)
+(defvar *pack-name* nil)
 
 (defun parse-function (meta-ptr)
   "Returns the function def."
@@ -136,11 +138,14 @@
                            (left-trim-string-to arg-types #\+)
                            arg-types))
 	  (name-func-ptr (read-from-string (concatenate 'string "*" name "-func-ptr*"))))
+      ;; don't export functions starting with '%'
+      (when (and *stream* (not (equal #\% (char name 0))))
+	(eval `(setf *exports* (append *exports* (list ',(read-from-string name))))))
+
+      (when (and (not *stream*) (not (equal #\% (char name 0))))
+	(eval `(export ',(read-from-string (concatenate 'string "'" name)) ',(read-from-string *pack-name*))))
+      
       `(progn
-         ;; don't export functions starting with '%'
-         ,(if (equal #\% (char name 0))
-              nil
-              `(export ',(read-from-string name)))
 	 ,(if *stream*
 	      `(defparameter ,name-func-ptr  nil)
 	      `(defparameter ,name-func-ptr ,func-ptr))
@@ -237,6 +242,15 @@
         `(cffi:defcstruct ,(read-from-string name)
              ,@(if slot-types (parse-cstruct-slots slot-names slot-types)))
 	(let ((d-name-pointer (read-from-string (concatenate 'string "*destruct-ptr-" name "*"))))
+	  ;;added due to issues with specialists
+	  (if *stream*
+	      (eval `(setf *exports* (append *exports* (list ',(read-from-string name)))))
+	      (eval `(export ',(read-from-string (concatenate 'string "'" name)) ',(read-from-string *pack-name*))))
+
+	  (when (not (cffi:null-pointer-p constructor))
+	    (if *stream*
+	      (eval `(setf *exports* (append *exports* (list ',(read-from-string (concatenate 'string "create-" name))))))
+	      (eval `(export ',(read-from-string (concatenate 'string "'create-" name)) ',(read-from-string *pack-name*)))))
 	  `(progn
 	     (defclass ,(read-from-string name) ,(parse-super-classes super-classes)
 	       ((cxx-class-ptr
@@ -246,8 +260,7 @@
 	       ;; TODO: add slots
 	       ;; ,@(if slot-types (parse-class-slots slot-names slot-types)))
 	       (:documentation "Cxx class stored in lisp"))
-
-	     (export ',(read-from-string name)) ;;added due to issues with specialists	     
+	     
 	     ,(if *stream*
 		  `(defparameter ,d-name-pointer nil)
 		  `(defparameter ,d-name-pointer ,destructor))	     
@@ -274,9 +287,9 @@
 		     ,(if *stream*
 			  `(defparameter ,construct-ptr nil)
 			  `(defparameter ,construct-ptr ,constructor))
-                     (export ',m-name)
+                     
                      (defun ,m-name (cl:&optional (class nil) cl:&rest rest)
-                       "create class with defualt constructor"
+                       "create class with default constructor"
                        (let* ((ptr (cffi:foreign-funcall-pointer
                                     ,construct-ptr nil :pointer))
 			      (initargs (append '(:cxx-ptr) (list ptr)))
@@ -324,12 +337,16 @@
 
 ;; Init. clcxx
 (defun init ()
+  (setf *exports* nil)
   (clcxx-init (callback lisp-error) (callback reg-data)))
+
+(defvar *cxx-file-name* nil)
 
 (defun add-package (pack-name func-name)
   "Register lisp package with pack-name
             from func-name defined in ClCxx lib"
   (declare (type string pack-name func-name))
+  (setf *pack-name* pack-name) 
   (let ((curr-pack (package-name *package*)))
     (unwind-protect
          (progn
@@ -340,7 +357,13 @@
 		    (in-package ,pack-name)
 		    (import 'cxx::cxx-ptr)
 		    (export 'cxx-ptr)))
-	   (register-package pack-name (foreign-symbol-pointer func-name)))
+	   (register-package pack-name (foreign-symbol-pointer func-name))
+	   (if *exports*
+	       (let ((file-stream (open *cxx-file-name*	:direction :output :if-exists :append))
+		     (*print-case* :downcase))
+		 (format file-stream "~%~%(export '~a)" *exports*)
+		 (close file-stream)
+		 (setf *exports* nil))))
       (eval `(in-package ,curr-pack)))))
 
 (defun remove-package (pack-name)
@@ -348,11 +371,10 @@
       (delete-package pack-name)))
 
 ;; *********** Generate common lisp files ****************
-(defvar *cxx-file-name* nil)
 
 ;; void send_data(MetaData *M, uint8_t n) 
 (defcallback reg-data-stream :void ((meta-ptr :pointer) (type :uint8))
-  (let ((file-stream (open *cxx-file-name* :direction :output :if-exists :append :if-does-not-exist :create)))
+  (let ((file-stream (open *cxx-file-name* :direction :output :if-exists :append)))
     (let ((*print-case* :downcase))
       (ecase type
 	(0
@@ -374,6 +396,7 @@
 
 (defun init-generate-lisp-code (file-name pack-name)
   (setf *cxx-file-name* file-name)
+  (setf *exports* nil)
   (let ((file-stream (open *cxx-file-name* :direction :output :if-exists :supersede :if-does-not-exist :create)))
     (format file-stream "(cl:when (not (cl:find-package ~@:(~S~)))~%  (cl:make-package ~@:(~S~))~%" pack-name pack-name)
     (format file-stream "  (cl:use-package 'cl '~a))~%(cl:in-package :~a)~%~%"  pack-name pack-name)
@@ -411,4 +434,5 @@
      (eval (parse-function-pointer meta-ptr)))))
 
 (defun init-cxx-wrap-ptr ()
+  (setf *exports* nil)
   (clcxx-init (callback lisp-error) (callback reg-data-cxx-wrap-ptr)))
