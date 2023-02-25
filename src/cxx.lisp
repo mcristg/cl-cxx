@@ -335,12 +335,13 @@
      (eval (parse-function meta-ptr)))))
 
 
+(defvar *file-stream* nil)
+
 ;; Init. clcxx
 (defun init ()
   (setf *exports* nil)
+  (setf *file-stream* nil)
   (clcxx-init (callback lisp-error) (callback reg-data)))
-
-(defvar *cxx-file-name* nil)
 
 (defun add-package (pack-name func-name)
   "Register lisp package with pack-name
@@ -358,12 +359,11 @@
 		    (import 'cxx::cxx-ptr)
 		    (export 'cxx-ptr)))
 	   (register-package pack-name (foreign-symbol-pointer func-name))
-	   (if *exports*
-	       (let ((file-stream (open *cxx-file-name*	:direction :output :if-exists :append))
-		     (*print-case* :downcase))
-		 (format file-stream "~%~%(export '~a)" *exports*)
-		 (close file-stream)
+	   (when *exports*
+	       (let ((*print-case* :downcase))
+		 (format *file-stream* "~%~%(export '~a)" *exports*)		 
 		 (setf *exports* nil))))
+      (when *file-stream* (close *file-stream*))      
       (eval `(in-package ,curr-pack)))))
 
 (defun remove-package (pack-name)
@@ -374,34 +374,30 @@
 
 ;; void send_data(MetaData *M, uint8_t n) 
 (defcallback reg-data-stream :void ((meta-ptr :pointer) (type :uint8))
-  (let ((file-stream (open *cxx-file-name* :direction :output :if-exists :append)))
-    (let ((*print-case* :downcase))
-      (ecase type
-	(0
+  (let ((*print-case* :downcase))
+    (ecase type
+      (0
 	 (setf *stream* t)
-	 (print (parse-class meta-ptr) file-stream)
+	 (print (parse-class meta-ptr) *file-stream*)
 	 (setf *stream* nil)
 	 (eval (parse-class meta-ptr)))
 
 	(1
-	 (print (parse-constant meta-ptr) file-stream)
+	 (print (parse-constant meta-ptr) *file-stream*)
 	 (eval (parse-constant meta-ptr)))
 
 	(2
 	 (setf *stream* t)
-	 (print (parse-function meta-ptr) file-stream)
+	 (print (parse-function meta-ptr) *file-stream*)
 	 (setf *stream* nil)
-	 (eval (parse-function meta-ptr))))
-      (close file-stream))))
+	 (eval (parse-function meta-ptr))))))
 
 (defun init-generate-lisp-code (file-name pack-name)
-  (setf *cxx-file-name* file-name)
   (setf *exports* '(cxx-ptr))
-  (let ((file-stream (open *cxx-file-name* :direction :output :if-exists :supersede :if-does-not-exist :create)))
-    (format file-stream "(cl:when (not (cl:find-package ~@:(~S~)))~%  (cl:make-package ~@:(~S~))~%" pack-name pack-name)
-    (format file-stream "  (cl:use-package 'cl '~a))~%~%(cl:in-package :~a)~%~%"  pack-name pack-name)
-    (format file-stream "(import 'cxx::cxx-ptr)~%")
-    (close file-stream))
+  (setf *file-stream* (open file-name :direction :output :if-exists :supersede :if-does-not-exist :create))
+  (format *file-stream* "(cl:when (not (cl:find-package ~@:(~S~)))~%  (cl:make-package ~@:(~S~))~%" pack-name pack-name)
+  (format *file-stream* "  (cl:use-package 'cl '~a))~%~%(cl:in-package :~a)~%~%"  pack-name pack-name)
+  (format *file-stream* "(import 'cxx::cxx-ptr)~%")
   (clcxx-init (callback lisp-error) (callback reg-data-stream)))
 
 (defun parse-function-pointer (meta-ptr)
@@ -435,4 +431,5 @@
 
 (defun init-cxx-wrap-ptr ()
   (setf *exports* nil)
+  (setf *file-stream* nil)
   (clcxx-init (callback lisp-error) (callback reg-data-cxx-wrap-ptr)))
