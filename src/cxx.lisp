@@ -361,9 +361,12 @@
 	   (register-package pack-name (foreign-symbol-pointer func-name))
 	   (when *exports*
 	       (let ((*print-case* :downcase))
-		 (format *file-stream* "~%~%(export '~a)" *exports*)		 
+		 (format *file-stream* "~%~%(export '~a)" *exports*)	 
 		 (setf *exports* nil))))
-      (when *file-stream* (close *file-stream*))      
+      (when (streamp *file-stream*)
+	(progn
+	  (close *file-stream*)
+	  (setf *file-stream* nil)))
       (eval `(in-package ,curr-pack)))))
 
 (defun remove-package (pack-name)
