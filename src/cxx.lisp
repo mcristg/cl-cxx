@@ -131,6 +131,20 @@
 (defvar *exports* nil)
 (defvar *pack-name* nil)
 
+(declaim (inline make-exports-in-funtion))
+(defun make-exports-in-funtion (name)
+  ;; don't export functions starting with '%'
+  (when (and *stream* (not (equal #\% (char name 0))))
+    (eval `(setf *exports* (append *exports* (list ',(read-from-string name))))))
+  (when (and (not *stream*) (not (equal #\% (char name 0))))
+    (eval `(export ',(read-from-string (concatenate 'string "'" name)) ',(read-from-string *pack-name*)))))
+
+(declaim (inline make-defparameter-function-ptr))
+(defun make-defparameter-function-ptr (name ptr)
+  `,(if *stream*
+       `(defparameter ,name nil)
+       `(defparameter ,name ,ptr)))
+
 (defun parse-function (meta-ptr)
   "Returns the function def."
   (with-foreign-slots ((name method-p class-obj func-ptr arg-types return-type) meta-ptr (:struct function-info))
@@ -138,17 +152,9 @@
                            (left-trim-string-to arg-types #\+)
                            arg-types))
 	  (name-func-ptr (read-from-string (concatenate 'string "*" name "-func-ptr*"))))
-      ;; don't export functions starting with '%'
-      (when (and *stream* (not (equal #\% (char name 0))))
-	(eval `(setf *exports* (append *exports* (list ',(read-from-string name))))))
-
-      (when (and (not *stream*) (not (equal #\% (char name 0))))
-	(eval `(export ',(read-from-string (concatenate 'string "'" name)) ',(read-from-string *pack-name*))))
-      
+      (make-exports-in-funtion name)
       `(progn
-	 ,(if *stream*
-	      `(defparameter ,name-func-ptr  nil)
-	      `(defparameter ,name-func-ptr ,func-ptr))
+	 ,(make-defparameter-function-ptr name-func-ptr func-ptr)	 
          (,(if method-p
                'defmethod
                'defun)
@@ -234,6 +240,16 @@
      for type in (split-string-by slot-types #\+)
      collect (list name (cffi-type type))))
 
+(declaim (inline make-exports-in-class))
+(defun make-exports-in-class (name constructor)
+  ;;added due to issues with specialists
+  (if *stream*
+      (eval `(setf *exports* (append *exports* (list ',(read-from-string name)))))
+      (eval `(export ',(read-from-string (concatenate 'string "'" name)) ',(read-from-string *pack-name*))))
+  (when (not (cffi:null-pointer-p constructor))
+    (if *stream*
+	(eval `(setf *exports* (append *exports* (list ',(read-from-string (concatenate 'string "create-" name))))))
+	(eval `(export ',(read-from-string (concatenate 'string "'create-" name)) ',(read-from-string *pack-name*))))))
 
 (defun parse-class (meta-ptr)
   "Define class"
@@ -242,15 +258,7 @@
         `(cffi:defcstruct ,(read-from-string name)
              ,@(if slot-types (parse-cstruct-slots slot-names slot-types)))
 	(let ((d-name-pointer (read-from-string (concatenate 'string "*destruct-ptr-" name "*"))))
-	  ;;added due to issues with specialists
-	  (if *stream*
-	      (eval `(setf *exports* (append *exports* (list ',(read-from-string name)))))
-	      (eval `(export ',(read-from-string (concatenate 'string "'" name)) ',(read-from-string *pack-name*))))
-
-	  (when (not (cffi:null-pointer-p constructor))
-	    (if *stream*
-	      (eval `(setf *exports* (append *exports* (list ',(read-from-string (concatenate 'string "create-" name))))))
-	      (eval `(export ',(read-from-string (concatenate 'string "'create-" name)) ',(read-from-string *pack-name*)))))
+	  (make-exports-in-class name constructor)
 	  `(progn
 	     (defclass ,(read-from-string name) ,(parse-super-classes super-classes)
 	       ((cxx-class-ptr
@@ -261,9 +269,7 @@
 	       ;; ,@(if slot-types (parse-class-slots slot-names slot-types)))
 	       (:documentation "Cxx class stored in lisp"))
 	     
-	     ,(if *stream*
-		  `(defparameter ,d-name-pointer nil)
-		  `(defparameter ,d-name-pointer ,destructor))	     
+	     ,(make-defparameter-function-ptr d-name-pointer destructor)     
 	     (defun ,(read-from-string
                     (concatenate 'string "destruct-ptr-" name)) (class-ptr)
              "delete class pointer"
@@ -284,10 +290,7 @@
 						   name
 						   "-default-constructor-ptr*"))))
                   `(progn
-		     ,(if *stream*
-			  `(defparameter ,construct-ptr nil)
-			  `(defparameter ,construct-ptr ,constructor))
-                     
+                     ,(make-defparameter-function-ptr construct-ptr constructor)
                      (defun ,m-name (cl:&optional (class nil) cl:&rest rest)
                        "create class with default constructor"
                        (let* ((ptr (cffi:foreign-funcall-pointer
@@ -343,6 +346,25 @@
   (setf *file-stream* nil)
   (clcxx-init (callback lisp-error) (callback reg-data)))
 
+(defun cxx-make-package (pack-name)
+  `,(progn (when (not (find-package pack-name))
+      (make-package pack-name)
+      (use-package 'cl pack-name))
+  (eval `(progn
+	   (in-package ,pack-name)
+	   (import 'cxx::cxx-ptr)
+	   (export 'cxx-ptr)))))
+
+(defun close-file-stream ()
+  (when *exports*
+    (let ((*print-case* :downcase))
+      (format *file-stream* "~%~%(export '~a)" *exports*)
+      (setf *exports* nil)))
+  (when (streamp *file-stream*)
+    (progn
+      (close *file-stream*)
+      (setf *file-stream* nil))))
+
 (defun add-package (pack-name func-name)
   "Register lisp package with pack-name
             from func-name defined in ClCxx lib"
@@ -350,23 +372,10 @@
   (setf *pack-name* pack-name) 
   (let ((curr-pack (package-name *package*)))
     (unwind-protect
-         (progn
-	   (when (not (find-package pack-name))
-	     (make-package pack-name)
-	     (use-package 'cl pack-name))
-	   (eval `(progn
-		    (in-package ,pack-name)
-		    (import 'cxx::cxx-ptr)
-		    (export 'cxx-ptr)))
+	 (progn
+	   (cxx-make-package pack-name)
 	   (register-package pack-name (foreign-symbol-pointer func-name))
-	   (when *exports*
-	       (let ((*print-case* :downcase))
-		 (format *file-stream* "~%~%(export '~a)" *exports*)	 
-		 (setf *exports* nil))))
-      (when (streamp *file-stream*)
-	(progn
-	  (close *file-stream*)
-	  (setf *file-stream* nil)))
+	   (close-file-stream))
       (eval `(in-package ,curr-pack)))))
 
 (defun remove-package (pack-name)
