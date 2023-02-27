@@ -347,7 +347,7 @@
   (clcxx-init (callback lisp-error) (callback reg-data)))
 
 (defun cxx-make-package (pack-name)
-  `,(progn (when (not (find-package pack-name))
+  (progn (when (not (find-package pack-name))
       (make-package pack-name)
       (use-package 'cl pack-name))
   (eval `(progn
