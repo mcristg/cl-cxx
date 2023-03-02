@@ -310,10 +310,10 @@
 (defun parse-constant (meta-ptr)
   "Define constant"
   (with-foreign-slots ((name value) meta-ptr (:struct constant-info))
-    `(progn
-       (export ',(read-from-string name))
-       (defconstant ,(read-from-string name)
-         ,(read-from-string value)))))
+    (if *stream*
+	(eval `(setf *exports* (append *exports* (list ',(read-from-string name)))))
+	(eval `(export ',(read-from-string name))))
+     `(defconstant ,(read-from-string name) ,(read-from-string value))))
 
 ;; inline void lisp_error(const char *error)
 (defcallback lisp-error :void ((err :string))
@@ -389,20 +389,22 @@
   (let ((*print-case* :downcase))
     (ecase type
       (0
-	 (setf *stream* t)
-	 (print (parse-class meta-ptr) *file-stream*)
-	 (setf *stream* nil)
-	 (eval (parse-class meta-ptr)))
+       (setf *stream* t)
+       (print (parse-class meta-ptr) *file-stream*)
+       (setf *stream* nil)
+       (eval (parse-class meta-ptr)))
 
-	(1
-	 (print (parse-constant meta-ptr) *file-stream*)
-	 (eval (parse-constant meta-ptr)))
+      (1
+       (setf *stream* t)
+       (print (parse-constant meta-ptr) *file-stream*)
+       (setf *stream* nil)
+       (eval (parse-constant meta-ptr)))
 
-	(2
-	 (setf *stream* t)
-	 (print (parse-function meta-ptr) *file-stream*)
-	 (setf *stream* nil)
-	 (eval (parse-function meta-ptr))))))
+      (2
+       (setf *stream* t)
+       (print (parse-function meta-ptr) *file-stream*)
+       (setf *stream* nil)
+       (eval (parse-function meta-ptr))))))
 
 (defun init-generate-lisp-code (file-name pack-name)
   (setf *exports* '(cxx-ptr))
